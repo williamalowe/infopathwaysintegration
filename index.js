@@ -1,5 +1,6 @@
 const express = require("express");
 const axios = require("axios");
+const { XMLParser } = require("fast-xml-parser");
 
 const app = express();
 app.use(express.json());
@@ -179,6 +180,34 @@ async function callSoap(envelope, action) {
   });
 }
 
+// ── Parse sessionId from SOAP XML response ────────────────────────────────────
+function parseSessionId(xmlString) {
+  try {
+    const parser = new XMLParser({ ignoreAttributes: false, cdataPropName: "__cdata" });
+    const parsed = parser.parse(xmlString);
+
+    // Drill into the SOAP envelope to find the RESPONSE content
+    const body = parsed?.["soap:Envelope"]?.["soap:Body"]
+              ?? parsed?.Envelope?.Body;
+
+    // The response value may be nested under various key names
+    const responseNode = body?.LOGONResponse ?? body?.logonResponse ?? {};
+    const rawCdata = responseNode?.RESPONSE?.__cdata
+                  ?? responseNode?.RESPONSE
+                  ?? "";
+
+    if (!rawCdata) return null;
+
+    // The CDATA content is itself XML — parse it again
+    const inner = parser.parse(rawCdata);
+    return inner?.root?.response?.sessionId
+        ?? inner?.root?.result?.sessionId
+        ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function handleSoapError(err, res) {
   const status = err.response?.status || 500;
   res.status(status).json({
@@ -201,7 +230,14 @@ app.post("/logon", requireApiKey, async (req, res) => {
   }
   try {
     const soapRes = await callSoap(buildLogonEnvelope(req.body), "LOGON");
-    res.json({ success: true, statusCode: soapRes.status, data: soapRes.data });
+    const sessionId = parseSessionId(soapRes.data);
+    res.json({
+      success: true,
+      statusCode: soapRes.status,
+      sessionId: sessionId ?? undefined,
+      ...(sessionId === null && { warning: "Could not parse sessionId from response — check rawResponse" }),
+      rawResponse: soapRes.data
+    });
   } catch (err) { handleSoapError(err, res); }
 });
 
