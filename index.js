@@ -1,22 +1,12 @@
 const express = require("express");
 const axios = require("axios");
-const rateLimit = require("express-rate-limit");
 
 const app = express();
 app.use(express.json());
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const SOAP_ENDPOINT = process.env.SOAP_ENDPOINT || "http://your-server/uniface/wsdl/CSYV1000";
-const PORT = process.env.PORT || 3000;
 const API_KEY = process.env.API_KEY || null;
-
-// ── Rate limiting ─────────────────────────────────────────────────────────────
-const limiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 30,
-  message: { error: "Too many requests, please slow down." }
-});
-app.use(limiter);
 
 // ── Auth middleware ───────────────────────────────────────────────────────────
 function requireApiKey(req, res, next) {
@@ -26,21 +16,21 @@ function requireApiKey(req, res, next) {
   next();
 }
 
-// ── Shared SOAP header fields ─────────────────────────────────────────────────
+// ── Shared base fields ────────────────────────────────────────────────────────
 function baseRequestFields(fields) {
   const {
-    service        = "CSYV1000",
-    groupId        = "",
-    product        = "External 1.0.0.0",
-    processId      = "1",
-    threadId       = "1",
-    nodeId         = "",
-    ipAddress      = "",
-    sourceUserId   = "",
-    sourceOSUserId = "",
-    uiForm         = "External",
+    service         = "CSYV1000",
+    groupId         = "",
+    product         = "External 1.0.0.0",
+    processId       = "1",
+    threadId        = "1",
+    nodeId          = "",
+    ipAddress       = "",
+    sourceUserId    = "",
+    sourceOSUserId  = "",
+    uiForm          = "External",
     groupIdPrevious = "",
-    trace          = ""
+    trace           = ""
   } = fields;
 
   return { service, groupId, product, processId, threadId, nodeId,
@@ -200,12 +190,10 @@ function handleSoapError(err, res) {
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
-// Health check
 app.get("/health", (req, res) => {
   res.json({ status: "ok", endpoint: SOAP_ENDPOINT });
 });
 
-// POST /logon
 app.post("/logon", requireApiKey, async (req, res) => {
   const { userId, password } = req.body;
   if (!userId || !password) {
@@ -217,7 +205,6 @@ app.post("/logon", requireApiKey, async (req, res) => {
   } catch (err) { handleSoapError(err, res); }
 });
 
-// POST /logoff
 app.post("/logoff", requireApiKey, async (req, res) => {
   const { sessionId } = req.body;
   if (!sessionId) {
@@ -229,7 +216,6 @@ app.post("/logoff", requireApiKey, async (req, res) => {
   } catch (err) { handleSoapError(err, res); }
 });
 
-// POST /external
 app.post("/external", requireApiKey, async (req, res) => {
   const { sessionId, method } = req.body;
   if (!sessionId || !method) {
@@ -241,9 +227,5 @@ app.post("/external", requireApiKey, async (req, res) => {
   } catch (err) { handleSoapError(err, res); }
 });
 
-// ── Start ─────────────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`✅ SOAP wrapper running on port ${PORT}`);
-  console.log(`   SOAP endpoint: ${SOAP_ENDPOINT}`);
-  console.log(`   Auth: ${API_KEY ? "API key required" : "No auth (set API_KEY env var to enable)"}`);
-});
+// ── Vercel export (no app.listen) ─────────────────────────────────────────────
+module.exports = app;

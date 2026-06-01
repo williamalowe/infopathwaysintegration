@@ -1,170 +1,77 @@
-# SOAP Wrapper — CSYV1000
+# SOAP Wrapper — CSYV1000 (Vercel)
 
-A lightweight REST wrapper that accepts JSON and forwards requests to the CSYV1000 SOAP endpoint. Supports LOGON, LOGOFF, and EXTERNAL operations.
+REST wrapper for the CSYV1000 SOAP endpoint, built for Vercel serverless deployment.
 
 ---
 
-## Setup
+## Project Structure
+
+```
+soap-wrapper-vercel/
+├── api/
+│   └── index.js      # Express app (exported for Vercel)
+├── vercel.json        # Routes all requests to api/index
+├── package.json
+├── .env.example
+└── .gitignore
+```
+
+---
+
+## Deploy to Vercel
+
+### Option A — Vercel CLI (fastest)
+```bash
+npm install -g vercel
+vercel        # follow the prompts
+```
+Then set your environment variables:
+```bash
+vercel env add SOAP_ENDPOINT
+vercel env add API_KEY        # optional
+```
+Redeploy to apply them:
+```bash
+vercel --prod
+```
+
+### Option B — GitHub import
+1. Push this folder to a GitHub repo
+2. Go to https://vercel.com/new → Import your repo
+3. Add environment variables in the Vercel dashboard under **Settings → Environment Variables**
+4. Deploy
+
+---
+
+## Local Development
 
 ```bash
 npm install
-cp .env.example .env   # then fill in your values
-npm start
-```
-
-For development with auto-reload:
-```bash
-npm run dev
+npm install -g vercel       # if not already installed
+cp .env.example .env        # fill in your values
+vercel dev                  # runs locally on http://localhost:3000
 ```
 
 ---
 
 ## Endpoints
 
-### `GET /health`
-Returns wrapper status and configured SOAP endpoint.
+| Method | Route | Required fields |
+|---|---|---|
+| GET | `/health` | — |
+| POST | `/logon` | `userId`, `password` |
+| POST | `/logoff` | `sessionId` |
+| POST | `/external` | `sessionId`, `method` |
+
+See the main README for full field documentation and example request bodies.
 
 ---
 
-### `POST /logon`
-Logs in and returns a session.
+## Environment Variables
 
-**Required fields:**
-| Field | Description |
-|---|---|
-| `userId` | Your Pathway user ID |
-| `password` | Your password |
-
-**Optional fields:**
-| Field | Default |
-|---|---|
-| `service` | `CSYV1000` |
-| `trace` | `""` |
-| `groupId` | `""` |
-| `product` | `External 1.0.0.0` |
-| `processId` | `1` |
-| `threadId` | `1` |
-| `nodeId` | `""` |
-| `ipAddress` | `""` |
-| `sourceUserId` | `""` |
-| `sourceOSUserId` | `""` |
-| `uiForm` | `External` |
-| `groupIdPrevious` | `""` |
-| `osUserId` | `""` |
-
-**Example:**
-```json
-{
-  "userId": "myuser",
-  "password": "mypassword",
-  "nodeId": "MY-APP",
-  "ipAddress": "127.0.0.1"
-}
-```
-
----
-
-### `POST /logoff`
-Ends an active session.
-
-**Required fields:**
-| Field | Description |
-|---|---|
-| `sessionId` | Session ID returned from `/logon` |
-
-**Optional fields:** same as `/logon` minus `userId`, `password`, `osUserId`.
-
-**Example:**
-```json
-{
-  "sessionId": "YOUR_SESSION_ID",
-  "sourceUserId": "myuser",
-  "nodeId": "MY-APP"
-}
-```
-
----
-
-### `POST /external`
-Performs an external operation (e.g. CreateRequest).
-
-**Required fields:**
-| Field | Description |
-|---|---|
-| `sessionId` | Active session ID from `/logon` |
-| `method` | Method name e.g. `CreateRequest` |
-
-**Optional base fields:** same as `/logoff`.
-
-**Optional `requestData` object:**
-| Field | Default |
-|---|---|
-| `requestTypeCode` | `""` |
-| `description` | `""` |
-| `notes` | `""` |
-| `priority` | `""` |
-| `nameNumber` | `""` |
-| `propertyId` | `""` |
-| `contactName` | `""` |
-| `contactPhone` | `""` |
-| `contactEmail` | `""` |
-
-**Example:**
-```json
-{
-  "sessionId": "YOUR_SESSION_ID",
-  "method": "CreateRequest",
-  "sourceUserId": "myuser",
-  "nodeId": "MY-APP",
-  "requestData": {
-    "requestTypeCode": "WLEAKS",
-    "description": "Water leak in unit 4B",
-    "notes": "Reported by tenant",
-    "contactName": "Jane Smith",
-    "contactPhone": "0400000000",
-    "contactEmail": "jane@example.com"
-  }
-}
-```
-
----
-
-## Typical Flow
-
-```
-POST /logon      →  get sessionId
-POST /external   →  use sessionId to perform actions
-POST /logoff     →  end session
-```
-
----
-
-## Auth (Optional)
-
-Set `API_KEY` in your `.env`. All requests must then include:
-```
-x-api-key: your-secret-key
-```
-
----
-
-## Cloud Deployment
-
-### Railway
-1. Push to GitHub
-2. New project → Deploy from GitHub repo
-3. Set environment variables in Railway dashboard
-4. Railway sets `PORT` automatically
-
-### Render
-1. Push to GitHub
-2. New Web Service → connect repo
-3. Build command: `npm install`
-4. Start command: `npm start`
-5. Add environment variables in dashboard
-
-### Environment Variables
 | Variable | Description |
 |---|---|
-| `SOAP_ENDPOINT` | Your full SOAP URL |
-| `API_KEY` | (Optional) Secret key for auth |
+| `SOAP_ENDPOINT` | Full URL of your SOAP service |
+| `API_KEY` | (Optional) Protects routes with `x-api-key` header |
+
+> **Note:** Vercel's free tier has a 10-second function timeout. If your SOAP server is slow, upgrade to Pro (60s) or set a shorter axios timeout to fail fast.
