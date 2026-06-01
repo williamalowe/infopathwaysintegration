@@ -183,26 +183,22 @@ async function callSoap(envelope, action) {
 // ── Parse sessionId from SOAP XML response ────────────────────────────────────
 function parseSessionId(xmlString) {
   try {
-    const parser = new XMLParser({ ignoreAttributes: false, cdataPropName: "__cdata" });
+    const parser = new XMLParser({ ignoreAttributes: false });
     const parsed = parser.parse(xmlString);
 
-    // Drill into the SOAP envelope to find the RESPONSE content
-    const body = parsed?.["soap:Envelope"]?.["soap:Body"]
+    // Drill into the SOAP envelope — server uses soapenv: prefix
+    const body = parsed?.["soapenv:Envelope"]?.["soapenv:Body"]
+              ?? parsed?.["soap:Envelope"]?.["soap:Body"]
               ?? parsed?.Envelope?.Body;
 
-    // The response value may be nested under various key names
-    const responseNode = body?.LOGONResponse ?? body?.logonResponse ?? {};
-    const rawCdata = responseNode?.RESPONSE?.__cdata
-                  ?? responseNode?.RESPONSE
-                  ?? "";
+    // Response is nested under tns:LOGON > RESPONSE
+    const logonNode = body?.["tns:LOGON"] ?? body?.LOGON ?? {};
+    const responseStr = logonNode?.RESPONSE?.["#text"] ?? logonNode?.RESPONSE ?? "";
 
-    if (!rawCdata) return null;
+    if (!responseStr) return null;
 
-    // The CDATA content is itself XML — parse it again
-    const inner = parser.parse(rawCdata);
-    return inner?.root?.response?.sessionId
-        ?? inner?.root?.result?.sessionId
-        ?? null;
+    const inner = parser.parse(responseStr);
+    return inner?.root?.response?.sessionId ?? null;
   } catch {
     return null;
   }
