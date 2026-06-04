@@ -18,9 +18,8 @@ function requireApiKey(req, res, next) {
 }
 
 // ── Shared base fields ────────────────────────────────────────────────────────
-function baseRequestFields(fields) {
+function baseRequestFields(fields, service = "CSYV1000") {
   const {
-    service         = "CSYV1000",
     groupId         = "",
     product         = "External 1.0.0.0",
     processId       = "1",
@@ -34,14 +33,16 @@ function baseRequestFields(fields) {
     trace           = ""
   } = fields;
 
-  return { service, groupId, product, processId, threadId, nodeId,
-           ipAddress, sourceUserId, sourceOSUserId, uiForm, groupIdPrevious, trace };
+  return {
+    service, groupId, product, processId, threadId, nodeId,
+    ipAddress, sourceUserId, sourceOSUserId, uiForm, groupIdPrevious, trace
+  };
 }
 
 // ── Envelope builders ─────────────────────────────────────────────────────────
 
 function buildLogonEnvelope(fields) {
-  const base = baseRequestFields(fields);
+  const base = baseRequestFields(fields, "CSYV1000");
   const { userId = "", password = "", osUserId = "" } = fields;
 
   return `<?xml version="1.0" encoding="utf-8"?>
@@ -77,7 +78,7 @@ function buildLogonEnvelope(fields) {
 }
 
 function buildLogoffEnvelope(fields) {
-  const base = baseRequestFields(fields);
+  const base = baseRequestFields(fields, "CSYV1000");
   const { sessionId = "" } = fields;
 
   return `<?xml version="1.0" encoding="utf-8"?>
@@ -111,20 +112,29 @@ function buildLogoffEnvelope(fields) {
 }
 
 function buildExternalEnvelope(fields) {
-  const base = baseRequestFields(fields);
+  // EXTERNAL/CreateRequest uses CIFV5600, not CSYV1000
+  const base = baseRequestFields(fields, "CIFV5600");
   const { sessionId = "", method = "", requestData = {} } = fields;
 
   const {
-    requestTypeCode = "",
-    description     = "",
-    notes           = "",
-    priority        = "",
-    nameNumber      = "",
-    propertyId      = "",
-    contactName     = "",
-    contactPhone    = "",
-    contactEmail    = ""
+    typeId              = "",
+    noteSummary         = "",
+    contactTypeId       = "",
+    receivingOfficerId  = "",
+    responsibleOfficerId = "",
+    actioningOfficerId  = "",
+    requestorTypeId     = "",
+    serviceDate         = "",
+    visibleToPublic     = "",
+    // Module links — required for WLEAKS
+    incidentPropertyId  = "",   // Incident Property module link
+    streetSuburb        = "",   // Street/Suburb module link
+    questionnaires      = "",
+    moduleLinks         = ""
   } = requestData;
+
+  // Build mandatory WLEAKS module links if property/street provided
+  const moduleLinksXml = buildModuleLinks({ incidentPropertyId, streetSuburb, moduleLinks });
 
   return `<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
@@ -153,20 +163,47 @@ function buildExternalEnvelope(fields) {
 </root>]]></REQUEST>
       <REQUESTDATA xsi:type="s:string"><![CDATA[<root>
   <request>
-    <requestTypeCode>${requestTypeCode}</requestTypeCode>
-    <description>${description}</description>
-    <notes>${notes}</notes>
-    <priority>${priority}</priority>
-    <nameNumber>${nameNumber}</nameNumber>
-    <propertyId>${propertyId}</propertyId>
-    <contactName>${contactName}</contactName>
-    <contactPhone>${contactPhone}</contactPhone>
-    <contactEmail>${contactEmail}</contactEmail>
+    <typeId>${typeId}</typeId>
+    <noteSummary>${noteSummary}</noteSummary>
+    <contactTypeId>${contactTypeId}</contactTypeId>
+    <receivingOfficerId>${receivingOfficerId}</receivingOfficerId>
+    <responsibleOfficerId>${responsibleOfficerId}</responsibleOfficerId>
+    <actioningOfficerId>${actioningOfficerId}</actioningOfficerId>
+    <requestorTypeId>${requestorTypeId}</requestorTypeId>
+    <serviceDate>${serviceDate}</serviceDate>
+    <visibleToPublic>${visibleToPublic}</visibleToPublic>
+    ${moduleLinksXml}
   </request>
 </root>]]></REQUESTDATA>
     </tns:EXTERNAL>
   </soap:Body>
 </soap:Envelope>`;
+}
+
+// ── Module links builder (required for WLEAKS) ────────────────────────────────
+function buildModuleLinks({ incidentPropertyId, streetSuburb, moduleLinks }) {
+  // If raw moduleLinks XML was passed, use it directly
+  if (moduleLinks) return moduleLinks;
+
+  const links = [];
+
+  if (incidentPropertyId) {
+    links.push(`<moduleLink>
+      <type>IncidentProperty</type>
+      <id>${incidentPropertyId}</id>
+    </moduleLink>`);
+  }
+
+  if (streetSuburb) {
+    links.push(`<moduleLink>
+      <type>StreetSuburb</type>
+      <value>${streetSuburb}</value>
+    </moduleLink>`);
+  }
+
+  if (links.length === 0) return "<moduleLinks/>";
+
+  return `<moduleLinks>\n    ${links.join("\n    ")}\n  </moduleLinks>`;
 }
 
 // ── Shared SOAP caller ────────────────────────────────────────────────────────
@@ -186,12 +223,10 @@ function parseSessionId(xmlString) {
     const parser = new XMLParser({ ignoreAttributes: false });
     const parsed = parser.parse(xmlString);
 
-    // Drill into the SOAP envelope — server uses soapenv: prefix
     const body = parsed?.["soapenv:Envelope"]?.["soapenv:Body"]
               ?? parsed?.["soap:Envelope"]?.["soap:Body"]
               ?? parsed?.Envelope?.Body;
 
-    // Response is nested under tns:LOGON > RESPONSE
     const logonNode = body?.["tns:LOGON"] ?? body?.LOGON ?? {};
     const responseStr = logonNode?.RESPONSE?.["#text"] ?? logonNode?.RESPONSE ?? "";
 
