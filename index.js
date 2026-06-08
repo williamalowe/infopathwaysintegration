@@ -1,6 +1,7 @@
 const express = require("express");
 const axios = require("axios");
 const { XMLParser } = require("fast-xml-parser");
+const { randomUUID } = require("crypto");
 
 const app = express();
 app.use(express.json());
@@ -20,7 +21,6 @@ function requireApiKey(req, res, next) {
 // ── Shared base fields ────────────────────────────────────────────────────────
 function baseRequestFields(fields, service = "CSYV1000") {
   const {
-    groupId         = "",
     product         = "External 1.0.0.0",
     processId       = "1",
     threadId        = "1",
@@ -34,7 +34,9 @@ function baseRequestFields(fields, service = "CSYV1000") {
   } = fields;
 
   return {
-    service, groupId, product, processId, threadId, nodeId,
+    service,
+    groupId: randomUUID().toUpperCase(), // fresh GUID on every call
+    product, processId, threadId, nodeId,
     ipAddress, sourceUserId, sourceOSUserId, uiForm, groupIdPrevious, trace
   };
 }
@@ -112,29 +114,24 @@ function buildLogoffEnvelope(fields) {
 }
 
 function buildExternalEnvelope(fields) {
-  // EXTERNAL/CreateRequest uses CIFV5600, not CSYV1000
   const base = baseRequestFields(fields, "CIFV5600");
   const { sessionId = "", method = "", requestData = {} } = fields;
 
   const {
-    typeId              = "",
-    noteSummary         = "",
-    contactTypeId       = "",
-    receivingOfficerId  = "",
-    responsibleOfficerId = "",
-    actioningOfficerId  = "",
-    requestorTypeId     = "",
-    serviceDate         = "",
-    visibleToPublic     = "",
-    // Module links — required for WLEAKS
-    incidentPropertyId  = "",   // Incident Property module link
-    streetSuburb        = "",   // Street/Suburb module link
-    questionnaires      = "",
-    moduleLinks         = ""
+    typeId               = "",
+    contactTypeId        = "",
+    receivingOfficerId   = "",
+    noteSummary          = "",
+    moduleLinks          = []   // array of { moduleLinkRoleTypeId, moduleLinkApplicationId }
   } = requestData;
 
-  // Build mandatory WLEAKS module links if property/street provided
-  const moduleLinksXml = buildModuleLinks({ incidentPropertyId, streetSuburb, moduleLinks });
+  // Build moduleLinks XML from array
+  const moduleLinksXml = moduleLinks.length > 0
+    ? `<moduleLinks>${moduleLinks.map(link => `<moduleLink>
+      <moduleLinkRoleTypeId>${link.moduleLinkRoleTypeId}</moduleLinkRoleTypeId>
+      <moduleLinkApplicationId>${link.moduleLinkApplicationId}</moduleLinkApplicationId>
+    </moduleLink>`).join("")}</moduleLinks>`
+    : "<moduleLinks/>";
 
   return `<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
@@ -164,46 +161,15 @@ function buildExternalEnvelope(fields) {
       <REQUESTDATA xsi:type="s:string"><![CDATA[<root>
   <request>
     <typeId>${typeId}</typeId>
-    <noteSummary>${noteSummary}</noteSummary>
     <contactTypeId>${contactTypeId}</contactTypeId>
     <receivingOfficerId>${receivingOfficerId}</receivingOfficerId>
-    <responsibleOfficerId>${responsibleOfficerId}</responsibleOfficerId>
-    <actioningOfficerId>${actioningOfficerId}</actioningOfficerId>
-    <requestorTypeId>${requestorTypeId}</requestorTypeId>
-    <serviceDate>${serviceDate}</serviceDate>
-    <visibleToPublic>${visibleToPublic}</visibleToPublic>
+    <noteSummary>${noteSummary}</noteSummary>
     ${moduleLinksXml}
   </request>
 </root>]]></REQUESTDATA>
     </tns:EXTERNAL>
   </soap:Body>
 </soap:Envelope>`;
-}
-
-// ── Module links builder (required for WLEAKS) ────────────────────────────────
-function buildModuleLinks({ incidentPropertyId, streetSuburb, moduleLinks }) {
-  // If raw moduleLinks XML was passed, use it directly
-  if (moduleLinks) return moduleLinks;
-
-  const links = [];
-
-  if (incidentPropertyId) {
-    links.push(`<moduleLink>
-      <type>IncidentProperty</type>
-      <id>${incidentPropertyId}</id>
-    </moduleLink>`);
-  }
-
-  if (streetSuburb) {
-    links.push(`<moduleLink>
-      <type>StreetSuburb</type>
-      <value>${streetSuburb}</value>
-    </moduleLink>`);
-  }
-
-  if (links.length === 0) return "<moduleLinks/>";
-
-  return `<moduleLinks>\n    ${links.join("\n    ")}\n  </moduleLinks>`;
 }
 
 // ── Shared SOAP caller ────────────────────────────────────────────────────────
@@ -217,25 +183,50 @@ async function callSoap(envelope, action) {
   });
 }
 
-// ── Parse sessionId from SOAP XML response ────────────────────────────────────
+// ── XML response parsers ──────────────────────────────────────────────────────
+const parser = new XMLParser({ ignoreAttributes: false });
+
+function decodeAndParse(str) {
+  // fast-xml-parser auto-decodes HTML entities into #text when attributes present
+  const raw = str?.["#text"] ?? str ?? "";
+  if (!raw) return null;
+  return parser.parse(raw);
+}
+
 function parseSessionId(xmlString) {
   try {
-    const parser = new XMLParser({ ignoreAttributes: false });
     const parsed = parser.parse(xmlString);
-
     const body = parsed?.["soapenv:Envelope"]?.["soapenv:Body"]
               ?? parsed?.["soap:Envelope"]?.["soap:Body"]
               ?? parsed?.Envelope?.Body;
-
     const logonNode = body?.["tns:LOGON"] ?? body?.LOGON ?? {};
-    const responseStr = logonNode?.RESPONSE?.["#text"] ?? logonNode?.RESPONSE ?? "";
-
-    if (!responseStr) return null;
-
-    const inner = parser.parse(responseStr);
+    const inner = decodeAndParse(logonNode?.RESPONSE);
     return inner?.root?.response?.sessionId ?? null;
   } catch {
     return null;
+  }
+}
+
+function parseRequestNumber(xmlString) {
+  try {
+    const parsed = parser.parse(xmlString);
+    const body = parsed?.["soapenv:Envelope"]?.["soapenv:Body"]
+              ?? parsed?.["soap:Envelope"]?.["soap:Body"]
+              ?? parsed?.Envelope?.Body;
+    const externalNode = body?.["tns:EXTERNAL"] ?? body?.EXTERNAL ?? {};
+
+    // Check RESPONSE for errors first
+    const responseInner = decodeAndParse(externalNode?.RESPONSE);
+    const status = responseInner?.root?.response?.status;
+    const error  = responseInner?.root?.response?.error;
+
+    // Parse requestNumber from RESPONSEDATA
+    const responseDataInner = decodeAndParse(externalNode?.RESPONSEDATA);
+    const requestNumber = responseDataInner?.root?.response?.requestNumber ?? null;
+
+    return { requestNumber, status, error: error || null };
+  } catch {
+    return { requestNumber: null, status: null, error: "Failed to parse response" };
   }
 }
 
@@ -290,7 +281,16 @@ app.post("/external", requireApiKey, async (req, res) => {
   }
   try {
     const soapRes = await callSoap(buildExternalEnvelope(req.body), "EXTERNAL");
-    res.json({ success: true, statusCode: soapRes.status, data: soapRes.data });
+    const { requestNumber, status, error } = parseRequestNumber(soapRes.data);
+    res.json({
+      success: true,
+      statusCode: soapRes.status,
+      requestNumber: requestNumber ?? undefined,
+      pathwayStatus: status ?? undefined,
+      pathwayError: error ?? undefined,
+      ...(requestNumber === null && { warning: "Could not parse requestNumber — check rawResponse" }),
+      rawResponse: soapRes.data
+    });
   } catch (err) { handleSoapError(err, res); }
 });
 
