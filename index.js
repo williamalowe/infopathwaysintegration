@@ -172,6 +172,71 @@ function buildExternalEnvelope(fields) {
 </soap:Envelope>`;
 }
 
+
+function buildFindNamesEnvelope(fields) {
+  const base = baseRequestFields(fields, 'CIFV5021');
+  const { sessionId = '', searchData = {} } = fields;
+
+  const {
+    name           = '',
+    givenname      = '',
+    nameid         = '',
+    nametype       = '',
+    phonetic        = 'false',
+    legalname      = '',
+    addrqual       = '',
+    roletypea      = '',
+    roletypen      = '',
+    retrievecount  = '10',
+    responsecount  = '10'
+  } = searchData;
+
+  return `<?xml version=1.0 encoding=utf-8?>
+<soap:Envelope xmlns:soap=http://schemas.xmlsoap.org/soap/envelope/
+               xmlns:tns=urn:uniface:applic:services:CSYV1000
+               xmlns:xsi=http://www.w3.org/2001/XMLSchema-instance
+               xmlns:s=http://www.w3.org/2001/XMLSchema
+               soap:encodingStyle=http://schemas.xmlsoap.org/soap/encoding/>
+  <soap:Body>
+    <tns:EXTERNAL>
+      <REQUEST xsi:type=s:string><![CDATA[<root>
+  <request>
+    <service>${base.service}</service>
+    <method>FindNames</method>
+    <sessionId>${sessionId}</sessionId>
+    <groupId>${base.groupId}</groupId>
+    <product>${base.product}</product>
+    <processId>${base.processId}</processId>
+    <threadId>${base.threadId}</threadId>
+    <nodeId>${base.nodeId}</nodeId>
+    <ipAddress>${base.ipAddress}</ipAddress>
+    <sourceUserId>${base.sourceUserId}</sourceUserId>
+    <sourceOSUserId>${base.sourceOSUserId}</sourceOSUserId>
+    <uiForm>${base.uiForm}</uiForm>
+    <groupIdPrevious>${base.groupIdPrevious}</groupIdPrevious>
+  </request>
+</root>]]></REQUEST>
+      <REQUESTDATA xsi:type=s:string><![CDATA[<root>
+  <request>
+    <retrievecount>${retrievecount}</retrievecount>
+    <responsecount>${responsecount}</responsecount>
+    <search>
+      <nameid>${nameid}</nameid>
+      <nametype>${nametype}</nametype>
+      <name>${name}</name>
+      <givenname>${givenname}</givenname>
+      <phonetic>${phonetic}</phonetic>
+      <legalname>${legalname}</legalname>
+      <addrqual>${addrqual}</addrqual>
+      <roletypea>${roletypea}</roletypea>
+      <roletypen>${roletypen}</roletypen>
+    </search>
+  </request>
+</root>]]></REQUESTDATA>
+    </tns:EXTERNAL>
+  </soap:Body>
+</soap:Envelope>`;
+}
 // ── Shared SOAP caller ────────────────────────────────────────────────────────
 async function callSoap(envelope, action) {
   return axios.post(SOAP_ENDPOINT, envelope, {
@@ -230,6 +295,41 @@ function parseRequestNumber(xmlString) {
   }
 }
 
+
+function parseFindNamesResponse(xmlString) {
+  try {
+    const parsed = parser.parse(xmlString);
+    const body = parsed?.['soapenv:Envelope']?.['soapenv:Body']
+              ?? parsed?.['soap:Envelope']?.['soap:Body']
+              ?? parsed?.Envelope?.Body;
+    const externalNode = body?.['tns:EXTERNAL'] ?? body?.EXTERNAL ?? {};
+
+    const responseInner = decodeAndParse(externalNode?.RESPONSE);
+    const status = responseInner?.root?.response?.status;
+    const error  = responseInner?.root?.response?.error;
+
+    const responseDataInner = decodeAndParse(externalNode?.RESPONSEDATA);
+    const results = responseDataInner?.root?.response?.results?.result ?? null;
+
+    // Normalise to array (single result comes back as object)
+    const resultsArray = results
+      ? (Array.isArray(results) ? results : [results])
+      : [];
+
+    const topResult = resultsArray[0] ?? null;
+
+    return {
+      nameId: topResult?.nameid ?? null,
+      topResult,
+      totalResults: resultsArray.length,
+      more: responseDataInner?.root?.response?.more ?? null,
+      status,
+      error: error || null
+    };
+  } catch {
+    return { nameId: null, topResult: null, totalResults: 0, more: null, status: null, error: 'Failed to parse response' };
+  }
+}
 function handleSoapError(err, res) {
   const status = err.response?.status || 500;
   res.status(status).json({
@@ -294,5 +394,28 @@ app.post("/external", requireApiKey, async (req, res) => {
   } catch (err) { handleSoapError(err, res); }
 });
 
+
+app.post('/find-names', requireApiKey, async (req, res) => {
+  const { sessionId } = req.body;
+  if (!sessionId) {
+    return res.status(400).json({ error: 'Missing required fields.', required: ['sessionId'] });
+  }
+  try {
+    const soapRes = await callSoap(buildFindNamesEnvelope(req.body), 'EXTERNAL');
+    const { nameId, topResult, totalResults, more, status, error } = parseFindNamesResponse(soapRes.data);
+    res.json({
+      success: true,
+      statusCode: soapRes.status,
+      nameId: nameId ?? undefined,
+      topResult: topResult ?? undefined,
+      totalResults,
+      more,
+      pathwayStatus: status ?? undefined,
+      pathwayError: error ?? undefined,
+      ...(nameId === null && { warning: 'Could not parse nameId — check rawResponse' }),
+      rawResponse: soapRes.data
+    });
+  } catch (err) { handleSoapError(err, res); }
+});
 // ── Vercel export (no app.listen) ─────────────────────────────────────────────
 module.exports = app;
