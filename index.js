@@ -174,68 +174,70 @@ function buildExternalEnvelope(fields) {
 
 
 function buildFindNamesEnvelope(fields) {
-  const base = baseRequestFields(fields, 'CIFV5021');
-  const { sessionId = '', searchData = {} } = fields;
+  const base = baseRequestFields(fields, "CIFV5021");
+  const { sessionId = "", searchData = {} } = fields;
 
   const {
-    name           = '',
-    givenname      = '',
-    nameid         = '',
-    nametype       = '',
-    phonetic        = 'false',
-    legalname      = '',
-    addrqual       = '',
-    roletypea      = '',
-    roletypen      = '',
-    retrievecount  = '10',
-    responsecount  = '10'
+    name          = "",
+    givenname     = "",
+    nameid        = "",
+    nametype      = "",
+    phonetic      = "false",
+    legalname     = "",
+    addrqual      = "",
+    roletypea     = "",
+    roletypen     = "",
+    retrievecount = "10",
+    responsecount = "10"
   } = searchData;
 
-  return `<?xml version=1.0 encoding=utf-8?>
-<soap:Envelope xmlns:soap=http://schemas.xmlsoap.org/soap/envelope/
-               xmlns:tns=urn:uniface:applic:services:CSYV1000
-               xmlns:xsi=http://www.w3.org/2001/XMLSchema-instance
-               xmlns:s=http://www.w3.org/2001/XMLSchema
-               soap:encodingStyle=http://schemas.xmlsoap.org/soap/encoding/>
-  <soap:Body>
-    <tns:EXTERNAL>
-      <REQUEST xsi:type=s:string><![CDATA[<root>
-  <request>
-    <service>${base.service}</service>
-    <method>FindNames</method>
-    <sessionId>${sessionId}</sessionId>
-    <groupId>${base.groupId}</groupId>
-    <product>${base.product}</product>
-    <processId>${base.processId}</processId>
-    <threadId>${base.threadId}</threadId>
-    <nodeId>${base.nodeId}</nodeId>
-    <ipAddress>${base.ipAddress}</ipAddress>
-    <sourceUserId>${base.sourceUserId}</sourceUserId>
-    <sourceOSUserId>${base.sourceOSUserId}</sourceOSUserId>
-    <uiForm>${base.uiForm}</uiForm>
-    <groupIdPrevious>${base.groupIdPrevious}</groupIdPrevious>
-  </request>
-</root>]]></REQUEST>
-      <REQUESTDATA xsi:type=s:string><![CDATA[<root>
-  <request>
-    <retrievecount>${retrievecount}</retrievecount>
-    <responsecount>${responsecount}</responsecount>
-    <search>
-      <nameid>${nameid}</nameid>
-      <nametype>${nametype}</nametype>
-      <name>${name}</name>
-      <givenname>${givenname}</givenname>
-      <phonetic>${phonetic}</phonetic>
-      <legalname>${legalname}</legalname>
-      <addrqual>${addrqual}</addrqual>
-      <roletypea>${roletypea}</roletypea>
-      <roletypen>${roletypen}</roletypen>
-    </search>
-  </request>
-</root>]]></REQUESTDATA>
-    </tns:EXTERNAL>
-  </soap:Body>
-</soap:Envelope>`;
+  return [
+    '<?xml version="1.0" encoding="utf-8"?>',
+    '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"',
+    '               xmlns:tns="urn:uniface:applic:services:CSYV1000"',
+    '               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"',
+    '               xmlns:s="http://www.w3.org/2001/XMLSchema"',
+    '               soap:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">',
+    '  <soap:Body>',
+    '    <tns:EXTERNAL>',
+    '      <REQUEST xsi:type="s:string"><![CDATA[<root>',
+    '  <request>',
+    `    <service>${base.service}</service>`,
+    "    <method>FindNames</method>",
+    `    <sessionId>${sessionId}</sessionId>`,
+    `    <groupId>${base.groupId}</groupId>`,
+    `    <product>${base.product}</product>`,
+    `    <processId>${base.processId}</processId>`,
+    `    <threadId>${base.threadId}</threadId>`,
+    `    <nodeId>${base.nodeId}</nodeId>`,
+    `    <ipAddress>${base.ipAddress}</ipAddress>`,
+    `    <sourceUserId>${base.sourceUserId}</sourceUserId>`,
+    `    <sourceOSUserId>${base.sourceOSUserId}</sourceOSUserId>`,
+    `    <uiForm>${base.uiForm}</uiForm>`,
+    `    <groupIdPrevious>${base.groupIdPrevious}</groupIdPrevious>`,
+    '  </request>',
+    '</root>]]></REQUEST>',
+    '      <REQUESTDATA xsi:type="s:string"><![CDATA[<root>',
+    '  <request>',
+    `    <retrievecount>${retrievecount}</retrievecount>`,
+    `    <responsecount>${responsecount}</responsecount>`,
+    '    <search>',
+    `      <nameid>${nameid}</nameid>`,
+    `      <nametype>${nametype}</nametype>`,
+    `      <name>${name}</name>`,
+    `      <givenname>${givenname}</givenname>`,
+    `      <phonetic>${phonetic}</phonetic>`,
+    `      <legalname>${legalname}</legalname>`,
+    `      <addrqual>${addrqual}</addrqual>`,
+    `      <roletypea>${roletypea}</roletypea>`,
+    `      <roletypen>${roletypen}</roletypen>`,
+    '    </search>',
+    '  </request>',
+    '</root>]]></REQUESTDATA>',
+    '    </tns:EXTERNAL>',
+    '  </soap:Body>',
+    '</soap:Envelope>'
+  ].join("\n");
 }
 // ── Shared SOAP caller ────────────────────────────────────────────────────────
 async function callSoap(envelope, action) {
