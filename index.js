@@ -319,17 +319,19 @@ function parseFindNamesResponse(xmlString) {
       : [];
 
     const topResult = resultsArray[0] ?? null;
+    const DEFAULT_NAME_ID = 87972;
 
     return {
-      nameId: topResult?.nameid ?? null,
+      nameId: topResult?.nameid ?? DEFAULT_NAME_ID,
       topResult,
       totalResults: resultsArray.length,
+      usedDefault: !topResult,
       more: responseDataInner?.root?.response?.more ?? null,
       status,
       error: error || null
     };
   } catch {
-    return { nameId: null, topResult: null, totalResults: 0, more: null, status: null, error: 'Failed to parse response' };
+    return { nameId: 87972, topResult: null, totalResults: 0, usedDefault: true, more: null, status: null, error: 'Failed to parse response' };
   }
 }
 function handleSoapError(err, res) {
