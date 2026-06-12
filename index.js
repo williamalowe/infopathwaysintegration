@@ -303,6 +303,64 @@ function buildPropertyAddressSearchEnvelope(fields) {
     '</soap:Envelope>'
   ].join("\n");
 }
+
+function buildStreetSuburbSearchEnvelope(fields) {
+  const base = baseRequestFields(fields, "CIFV5030");
+  const { sessionId = "", searchData = {} } = fields;
+
+  const {
+    streetname     = "",
+    suburbname     = "",
+    councilid      = "",
+    retrievecount  = "10",
+    responsecount  = "10"
+  } = searchData;
+
+  return [
+    '<?xml version="1.0" encoding="utf-8"?>',
+    '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"',
+    '               xmlns:tns="urn:uniface:applic:services:CSYV1000"',
+    '               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"',
+    '               xmlns:s="http://www.w3.org/2001/XMLSchema"',
+    '               soap:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">',
+    '  <soap:Body>',
+    '    <tns:EXTERNAL>',
+    '      <REQUEST xsi:type="s:string"><![CDATA[<root>',
+    '  <request>',
+    `    <service>${base.service}</service>`,
+    "    <method>StreetSuburbSearch</method>",
+    `    <sessionId>${sessionId}</sessionId>`,
+    `    <groupId>${base.groupId}</groupId>`,
+    `    <product>${base.product}</product>`,
+    `    <processId>${base.processId}</processId>`,
+    `    <threadId>${base.threadId}</threadId>`,
+    `    <nodeId>${base.nodeId}</nodeId>`,
+    `    <ipAddress>${base.ipAddress}</ipAddress>`,
+    `    <sourceUserId>${base.sourceUserId}</sourceUserId>`,
+    `    <sourceOSUserId>${base.sourceOSUserId}</sourceOSUserId>`,
+    `    <uiForm>${base.uiForm}</uiForm>`,
+    `    <groupIdPrevious>${base.groupIdPrevious}</groupIdPrevious>`,
+    '  </request>',
+    '</root>]]></REQUEST>',
+    '      <REQUESTDATA xsi:type="s:string"><![CDATA[<root>',
+    '  <request>',
+    `    <retrievecount>${retrievecount}</retrievecount>`,
+    `    <responsecount>${responsecount}</responsecount>`,
+    '    <search>',
+    `      <streetname>${streetname}</streetname>`,
+    `      <suburbname>${suburbname}</suburbname>`,
+    `      <councilid>${councilid}</councilid>`,
+    '      <current>true</current>',
+    '      <proposed>false</proposed>',
+    '      <historic>false</historic>',
+    '    </search>',
+    '  </request>',
+    '</root>]]></REQUESTDATA>',
+    '    </tns:EXTERNAL>',
+    '  </soap:Body>',
+    '</soap:Envelope>'
+  ].join("\n");
+}
 // ── Shared SOAP caller ────────────────────────────────────────────────────────
 async function callSoap(envelope, action) {
   return axios.post(SOAP_ENDPOINT, envelope, {
@@ -435,6 +493,43 @@ function parsePropertyAddressSearchResponse(xmlString) {
     return { propertyId: 393760, topResult: null, totalResults: 0, usedDefault: true, more: null, status: null, error: "Failed to parse response" };
   }
 }
+
+function parseStreetSuburbSearchResponse(xmlString) {
+  try {
+    const parsed = parser.parse(xmlString);
+    const body = parsed?.["soapenv:Envelope"]?.["soapenv:Body"]
+              ?? parsed?.["soap:Envelope"]?.["soap:Body"]
+              ?? parsed?.Envelope?.Body;
+    const externalNode = body?.["tns:EXTERNAL"] ?? body?.EXTERNAL ?? {};
+
+    const responseInner = decodeAndParse(externalNode?.RESPONSE);
+    const status = responseInner?.root?.response?.status;
+    const error  = responseInner?.root?.response?.error;
+
+    const responseDataInner = decodeAndParse(externalNode?.RESPONSEDATA);
+    const results = responseDataInner?.root?.response?.results?.result ?? null;
+
+    // Normalise to array (single result comes back as object)
+    const resultsArray = results
+      ? (Array.isArray(results) ? results : [results])
+      : [];
+
+    const topResult = resultsArray[0] ?? null;
+    const DEFAULT_STREET_SUBURB_ID = 215614;
+
+    return {
+      streetSuburbId: topResult?.streetSuburbId ?? DEFAULT_STREET_SUBURB_ID,
+      topResult,
+      totalResults: resultsArray.length,
+      usedDefault: !topResult,
+      more: responseDataInner?.root?.response?.more ?? null,
+      status,
+      error: error || null
+    };
+  } catch {
+    return { streetSuburbId: 215614, topResult: null, totalResults: 0, usedDefault: true, more: null, status: null, error: "Failed to parse response" };
+  }
+}
 function handleSoapError(err, res) {
   const status = err.response?.status || 500;
   res.status(status).json({
@@ -535,6 +630,29 @@ app.post("/property-address-search", requireApiKey, async (req, res) => {
       success: true,
       statusCode: soapRes.status,
       propertyId,
+      topResult: topResult ?? undefined,
+      totalResults,
+      usedDefault,
+      more,
+      pathwayStatus: status ?? undefined,
+      pathwayError: error ?? undefined,
+      rawResponse: soapRes.data
+    });
+  } catch (err) { handleSoapError(err, res); }
+});
+
+app.post("/street-suburb-search", requireApiKey, async (req, res) => {
+  const { sessionId } = req.body;
+  if (!sessionId) {
+    return res.status(400).json({ error: "Missing required fields.", required: ["sessionId"] });
+  }
+  try {
+    const soapRes = await callSoap(buildStreetSuburbSearchEnvelope(req.body), "EXTERNAL");
+    const { streetSuburbId, topResult, totalResults, more, usedDefault, status, error } = parseStreetSuburbSearchResponse(soapRes.data);
+    res.json({
+      success: true,
+      statusCode: soapRes.status,
+      streetSuburbId,
       topResult: topResult ?? undefined,
       totalResults,
       usedDefault,
