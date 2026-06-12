@@ -409,13 +409,14 @@ function parseRequestNumber(xmlString) {
     const status = responseInner?.root?.response?.status;
     const error  = responseInner?.root?.response?.error;
 
-    // Parse requestNumber from RESPONSEDATA
+    // Parse requestNumber and id from RESPONSEDATA
     const responseDataInner = decodeAndParse(externalNode?.RESPONSEDATA);
     const requestNumber = responseDataInner?.root?.response?.requestNumber ?? null;
+    const id = responseDataInner?.root?.response?.id ?? null;
 
-    return { requestNumber, status, error: error || null };
+    return { requestNumber, id, status, error: error || null };
   } catch {
-    return { requestNumber: null, status: null, error: "Failed to parse response" };
+    return { requestNumber: null, id: null, status: null, error: "Failed to parse response" };
   }
 }
 
@@ -581,11 +582,12 @@ app.post("/external", requireApiKey, async (req, res) => {
   }
   try {
     const soapRes = await callSoap(buildExternalEnvelope(req.body), "EXTERNAL");
-    const { requestNumber, status, error } = parseRequestNumber(soapRes.data);
+    const { requestNumber, id, status, error } = parseRequestNumber(soapRes.data);
     res.json({
       success: true,
       statusCode: soapRes.status,
       requestNumber: requestNumber ?? undefined,
+      id: id ?? undefined,
       pathwayStatus: status ?? undefined,
       pathwayError: error ?? undefined,
       ...(requestNumber === null && { warning: "Could not parse requestNumber — check rawResponse" }),
